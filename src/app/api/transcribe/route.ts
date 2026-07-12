@@ -147,16 +147,38 @@ async function analyzeWithGEMINI(
   const completion = await responseClient.create({
     model: "gemini-2.5-pro",
     input: JSON.stringify({
-      task:
-        "Analyze this speech transcript. Use the supplied metrics. Return JSON with scores from 1 to 10 and concise feedback only.",
-      transcript,
-      metrics
+      task: `
+Return ONLY valid JSON.
+
+Do not use markdown.
+Do not use bullet points.
+Do not wrap the JSON in \`\`\`.
+
+Return exactly:
+
+{
+  "scores":{
+    "clarity":8,
+    "confidence":8,
+    "structure":8
+  },
+  "feedback":[
+    "...",
+    "...",
+    "..."
+  ]
+}
+`
     })
   });
 
-  const raw = completion.output?.[0]?.content?.[0]?.text ?? "{}";
-  const parsed = JSON.parse(raw) as Partial<AnalysisResponse>;
+const raw = completion.output?.[0]?.content?.[0]?.text ?? "{}";
 
+console.log("========== GEMINI RAW ==========");
+console.log(raw);
+console.log("================================");
+
+const parsed = JSON.parse(raw) as Partial<AnalysisResponse>;
   return {
     transcript,
     metrics,

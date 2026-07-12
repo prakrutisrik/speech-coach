@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
-import "./globals.css";
+import { AuthProvider } from "@/components/AuthProvider";
+import { Header } from "@/components/Header";
+import Footer from "@/components/Footer";
+import { createClient } from "@/lib/supabase/server";
+import "./globals.css"
 
 export const metadata: Metadata = {
   title: "Speech Coach",
@@ -13,7 +17,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider >
+        <Header />
+      <main>{children}</main>
+        <Footer />
+        </AuthProvider>
+        </body>
     </html>
   );
 }

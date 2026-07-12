@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SpeechAnalysis } from "@/components/Results";
+import type { SpeechAnalysis } from "@/types/speech";
 import { Timer } from "@/components/Timer";
-
 
 const RECORDING_SECONDS = 60;
 
@@ -12,153 +11,140 @@ type RecorderProps = {
   onLoadingChange: (isLoading: boolean) => void;
   onError: (message: string | null) => void;
   onStartNewPrompt: () => void;
+  prompt: string;
 };
 
 export function Recorder({
   onResults,
   onLoadingChange,
   onError,
-  onStartNewPrompt
+  onStartNewPrompt,
+  prompt
 }: RecorderProps) {
-  const transcriptRef = useRef("");
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(RECORDING_SECONDS);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const startedAtRef = useRef<number>(0);
-  const streamRef = useRef<MediaStream | null>(null);
 
-  const uploadTranscript = useCallback(
-  async (transcript: string, durationSeconds: number) => {
-    onLoadingChange(true);
-    onError(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const transcriptRef = useRef("");
+  const startedAtRef = useRef(0);
 
-    try {
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          transcript,
-          duration: durationSeconds
-        })
-      });
+  const analyzeTranscript = useCallback(
+    async (transcript: string, durationSeconds: number) => {
+      onLoadingChange(true);
+      onError(null);
 
-      const payload = await response.json();
+      try {
+        const response = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            transcript,
+            duration: durationSeconds
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Unable to analyze speech.");
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to analyze speech.");
+        }
+
+        const analysis = payload as SpeechAnalysis;
+
+        onResults(analysis);
+
+        const saveResponse = await fetch("/api/speeches", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            prompt,
+            durationSeconds,
+            analysis
+          })
+        });
+
+        if (!saveResponse.ok && saveResponse.status !== 401) {
+          const savePayload = await saveResponse.json();
+          onError(savePayload.error ?? "Analysis completed, but saving failed.");
+        }
+      } catch (error) {
+        onError(
+          error instanceof Error
+            ? error.message
+            : "Unable to analyze speech."
+        );
+      } finally {
+        onLoadingChange(false);
       }
-
-      onResults(payload as SpeechAnalysis);
-    } catch (error) {
-      onError(
-        error instanceof Error
-          ? error.message
-          : "Unable to analyze speech."
-      );
-    } finally {
-      onLoadingChange(false);
-    }
-  },
-  [onError, onLoadingChange, onResults]
-);
+    },
+    [onError, onLoadingChange, onResults, prompt]
+  );
 
   const stopRecording = useCallback(() => {
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recognitionRef.current?.stop();
-      recorder.stop();
-    }
-  }, []);
+    recognitionRef.current?.stop();
 
-  const startRecording = async () => {
+    setIsRecording(false);
+
+    const durationSeconds = Math.max(
+      1,
+      Math.round((Date.now() - startedAtRef.current) / 1000)
+    );
+
+    if (!transcriptRef.current.trim()) {
+      onError("No speech detected. Please try again.");
+      return;
+    }
+
+    void analyzeTranscript(transcriptRef.current, durationSeconds);
+  }, [analyzeTranscript, onError]);
+
+  const startRecording = () => {
     onStartNewPrompt();
     onError(null);
     setSecondsRemaining(RECORDING_SECONDS);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      const SpeechRecognitionAPI =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
-
-if (!SpeechRecognitionAPI) {
-  throw new Error(
-    "Speech Recognition is not supported in this browser. Use Chrome."
-  );
-}
-
-const recognition = new SpeechRecognitionAPI();
-
-recognition.continuous = true;
-recognition.interimResults = true;
-recognition.lang = "en-US";
-
-transcriptRef.current = "";
-
-recognition.onresult = (event) => {
-  let transcript = "";
-
-  for (let i = 0; i < event.results.length; i++) {
-    transcript += event.results[i][0].transcript + " ";
-  }
-
-  transcriptRef.current = transcript.trim();
-};
-
-recognition.onerror = (event) => {
-  console.error(event);
-};
-
-recognition.start();
-
-recognitionRef.current = recognition;
-
-      streamRef.current = stream;
-      chunksRef.current = [];
-      startedAtRef.current = Date.now();
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const durationSeconds = Math.max(
-          1,
-          Math.round((Date.now() - startedAtRef.current) / 1000)
-        );
-        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
-
-        streamRef.current?.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-        setIsRecording(false);
-
-        if (transcriptRef.current.trim()) {
-  void uploadTranscript(
-    transcriptRef.current,
-    durationSeconds
-  );
-} else {
-  onError("No speech was detected.");
-}
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      onError(
-        error instanceof Error
-          ? error.message
-          : "Microphone access was blocked or unavailable."
-      );
+    if (!SpeechRecognition) {
+      onError("Speech Recognition is not supported in this browser.");
+      return;
     }
+
+    transcriptRef.current = "";
+    startedAtRef.current = Date.now();
+
+    const recognition = new SpeechRecognition();
+
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event: any) => {
+      let transcript = "";
+
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript + " ";
+      }
+
+      transcriptRef.current = transcript.trim();
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error !== "aborted") {
+        onError(event.error);
+        setIsRecording(false);
+      }
+    };
+
+    recognition.start();
+
+    recognitionRef.current = recognition;
+    setIsRecording(true);
   };
 
   useEffect(() => {
@@ -183,14 +169,17 @@ recognitionRef.current = recognition;
 
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      recognitionRef.current?.stop();
     };
   }, []);
 
   return (
     <section className="rounded-lg border border-ink/10 bg-white/85 p-6 shadow-panel">
       <div className="space-y-6">
-        <Timer secondsRemaining={secondsRemaining} totalSeconds={RECORDING_SECONDS} />
+        <Timer
+          secondsRemaining={secondsRemaining}
+          totalSeconds={RECORDING_SECONDS}
+        />
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <button
@@ -201,6 +190,7 @@ recognitionRef.current = recognition;
           >
             Start recording
           </button>
+
           <button
             className="rounded-md bg-coral px-5 py-3 font-semibold text-white transition hover:bg-coral/90 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!isRecording}

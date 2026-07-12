@@ -1,20 +1,8 @@
 "use client";
 
-export type SpeechAnalysis = {
-  transcript: string;
-  metrics: {
-    fillerWords: number;
-    wordsPerMinute: number;
-    repetitions?: number;
-    averageSentenceLength?: number;
-  };
-  scores: {
-    clarity: number;
-    confidence: number;
-    structure: number;
-  };
-  feedback: string[];
-};
+import type { SpeechAnalysis } from "@/types/speech";
+
+export type { SpeechAnalysis };
 
 type ResultsProps = {
   results: SpeechAnalysis | null;
@@ -43,7 +31,7 @@ export function Results({ results, isLoading, error }: ResultsProps) {
     );
   }
 
-  if (error) {
+  if (error && !results) {
     return (
       <section className="rounded-lg border border-coral/30 bg-white/85 p-6 shadow-panel">
         <p className="text-lg font-semibold text-coral">Something went wrong</p>
@@ -65,6 +53,11 @@ export function Results({ results, isLoading, error }: ResultsProps) {
 
   return (
     <section className="space-y-5 rounded-lg border border-ink/10 bg-white/85 p-6 shadow-panel">
+      {error ? (
+        <p className="rounded-md border border-coral/30 bg-coral/10 px-3 py-2 text-sm text-coral">
+          {error}
+        </p>
+      ) : null}
       <div>
         <h2 className="text-xl font-bold text-ink">Results dashboard</h2>
         <p className="mt-1 text-sm text-ink/65">
